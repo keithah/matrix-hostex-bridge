@@ -8,7 +8,6 @@ A Matrix bridge for the Hostex property management system using mautrix-go bridg
 - ✅ **Real-time sync** - New messages appear in Matrix within 30 seconds
 - ✅ **Image attachments** - Images from Hostex display properly in Matrix (recently fixed!)
 - ✅ **Property-prefixed rooms** - Rooms are named with property prefix: "(Property Name) - Guest Name"
-- ✅ **Double puppeting support** - Host messages appear as sent by you (when supported by homeserver)
 - ✅ **Beeper integration** - Full compatibility with Beeper's bridge-manager
 - ✅ **Message backfilling** - Historical messages are imported when creating rooms
 - ✅ **Echo prevention** - Prevents duplicate messages when sending from Matrix
@@ -78,7 +77,7 @@ sudo apt install libolm-dev
 1. Clone and build the bridge:
 
 ```bash
-git clone https://github.com/yourusername/matrix-hostex-bridge.git
+git clone https://github.com/keithah/matrix-hostex-bridge.git
 cd matrix-hostex-bridge
 
 # Build with proper CGO flags for libolm
