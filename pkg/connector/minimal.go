@@ -58,7 +58,7 @@ func (hc *MinimalHostexConnector) GetName() bridgev2.BridgeName {
 	return bridgev2.BridgeName{
 		DisplayName:      "Hostex",
 		NetworkURL:       "https://hostex.io",
-		NetworkIcon:      "mxc://hostex.io/icon",
+		NetworkIcon:      "mxc://local.beeper.com/hostex-logo",  // Hostex logo from https://www.hotelminder.com/images/brand/Hostex.png
 		NetworkID:        "hostex",
 		BeeperBridgeType: "hostex",
 		DefaultPort:      29337,

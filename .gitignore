@@ -51,3 +51,6 @@ matrix_*.log
 # Temporary files
 *.tmp
 *.temp
+
+# Downloaded assets
+hostex-logo.png

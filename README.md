@@ -102,14 +102,21 @@ CGO_CFLAGS="-I$(brew --prefix)/include" CGO_LDFLAGS="-L$(brew --prefix)/lib" go 
 
 - **Matrix Homeserver**: Your Matrix server URL and credentials
 - **Hostex API Token**: Your Hostex access token from the API settings
-- **Webhook URL**: Public URL where Hostex can send webhooks
 
 ### Hostex API Setup
 
 1. Log into your Hostex account
 2. Go to API Settings
 3. Generate an access token
-4. Configure webhook URL pointing to your bridge instance: `https://your-bridge.com/webhook/hostex`
+
+### Setting up Bridge Avatar
+
+The bridge uses the official Hostex logo as its avatar. To set this up:
+
+1. Start your bridge: `./mautrix-hostex`
+2. Upload the logo using the provided script: `./upload-avatar.sh`
+3. Update your `config.yaml` with the returned mxc:// URI
+4. Restart the bridge to apply the new avatar
 
 ## Usage
 
@@ -187,7 +194,9 @@ curl -H "Hostex-Access-Token: your-token" https://api.hostex.io/v1/properties
 
 ## License
 
-This project is licensed under the AGPL-3.0 License - see the LICENSE file for details.
+This project is licensed under the Mozilla Public License 2.0 (MPL-2.0) - see the LICENSE file for details.
+
+This license choice matches the core mautrix framework dependency and allows commercial use while ensuring improvements to the bridge remain open source.
 
 ## Support
 
