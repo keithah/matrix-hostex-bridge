@@ -756,6 +756,9 @@ func (hn *HostexNetworkAPI) queueMessageEvent(ctx context.Context, portalKey net
 
 			// Handle attachments (images, files, etc.)
 			if data.Attachment != nil {
+				// Debug: Log attachment data structure
+				portal.Bridge.Log.Debug().Interface("attachment", data.Attachment).Str("message_id", data.ID).Msg("Processing attachment")
+				
 				// Try to parse attachment as an object
 				attachmentBytes, err := json.Marshal(data.Attachment)
 				if err == nil {
@@ -910,6 +913,7 @@ func (hn *HostexNetworkAPI) queueMessageEvent(ctx context.Context, portalKey net
 
 			// If no parts were created, add a default text message
 			if len(parts) == 0 {
+				portal.Bridge.Log.Debug().Str("message_id", data.ID).Str("content", data.Content).Interface("attachment", data.Attachment).Msg("No message parts created, falling back to empty message")
 				parts = append(parts, &bridgev2.ConvertedMessagePart{
 					Type: event.EventMessage,
 					Content: &event.MessageEventContent{

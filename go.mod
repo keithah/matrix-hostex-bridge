@@ -4,6 +4,7 @@ go 1.24.5
 
 require (
 	github.com/gorilla/mux v1.8.0
+	github.com/rs/zerolog v1.34.0
 	go.mau.fi/util v0.8.8
 	maunium.net/go/mautrix v0.24.2
 )
@@ -18,7 +19,6 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.28 // indirect
 	github.com/petermattis/goid v0.0.0-20250508124226-395b08cebbdb // indirect
 	github.com/rs/xid v1.6.0 // indirect
-	github.com/rs/zerolog v1.34.0 // indirect
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
