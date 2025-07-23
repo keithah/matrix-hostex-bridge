@@ -13,7 +13,7 @@ A Matrix bridge for the Hostex property management system using mautrix-go bridg
 - ✅ **Echo prevention** - Prevents duplicate messages when sending from Matrix
 - ✅ **Efficient polling** - Only processes conversations with new messages
 - ✅ **Manual refresh command** - Force conversation cache refresh with `!hostex refresh`
-- ✅ **Double puppeting** - **WORKING!** Host messages appear as sent by you (not bridge bot) when using Beeper
+- ✅ **Double puppeting** - Host messages appear as sent by you (not bridge bot) when using Beeper
 
 ## Architecture
 
