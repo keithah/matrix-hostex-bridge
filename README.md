@@ -1,19 +1,19 @@
 # Matrix Hostex Bridge
 
-A Matrix bridge for the Hostex property management system using mautrix-go bridgev2 framework. This bridge allows you to receive and send messages from your Hostex conversations directly in Matrix.
+A Matrix bridge for the Hostex property management system using mautrix-go bridgev2 framework. This bridge allows you to receive and send messages from your Hostex conversations directly in Matrix with full **double puppeting support** - your host messages appear as sent by you, not the bridge bot.
 
 ## Features
 
 - ✅ **Bidirectional messaging** - Send and receive messages between Matrix and Hostex
 - ✅ **Real-time sync** - New messages appear in Matrix within 30 seconds
-- ✅ **Image attachments** - Images from Hostex display properly in Matrix (recently fixed!)
+- ✅ **Image attachments** - Images from Hostex display properly in Matrix
 - ✅ **Property-prefixed rooms** - Rooms are named with property prefix: "(Property Name) - Guest Name"
 - ✅ **Beeper integration** - Full compatibility with Beeper's bridge-manager
 - ✅ **Message backfilling** - Historical messages are imported when creating rooms
 - ✅ **Echo prevention** - Prevents duplicate messages when sending from Matrix
 - ✅ **Efficient polling** - Only processes conversations with new messages
 - ✅ **Manual refresh command** - Force conversation cache refresh with `!hostex refresh`
-- ✅ **Double puppeting** - Host messages appear as sent by you (not bridge bot) when using Beeper
+- ✅ **Double puppeting** - **WORKING!** Host messages appear as sent by you (not bridge bot) when using Beeper
 - ✅ **HTTP endpoints** - Webhook support for real-time notifications from Hostex
 
 ## Architecture
