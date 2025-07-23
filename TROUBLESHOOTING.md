@@ -94,6 +94,27 @@
 2. **Force sync**: Use `!hostex refresh` command in bridge management room
 3. **Check logs**: Look for specific error messages about room creation
 
+### Command Processing Issues
+
+**Symptoms:**
+- Bridge commands like `!hostex refresh` or `help` don't work
+- Commands are ignored or show no response
+- Logs show "unencrypted message" errors with "FAIL_RETRIABLE" status
+
+**Solution:**
+1. **Check encryption settings**: In config.yaml, ensure `encryption.require: false`
+   ```yaml
+   encryption:
+     allow: true
+     default: true
+     require: false  # Must be false to process unencrypted commands
+   ```
+2. **Restart bridge**: Kill and restart the bridge process after config changes
+3. **Test commands**: Try `help` command first to verify basic functionality
+
+**Background:**
+The bridge may be configured to require all messages to be encrypted, but commands are often sent unencrypted. Setting `require: false` allows the bridge to process both encrypted room messages and unencrypted commands.
+
 ## Debugging Steps
 
 ### Enable Debug Logging

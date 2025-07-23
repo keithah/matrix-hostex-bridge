@@ -6,7 +6,7 @@ A Matrix bridge for the Hostex property management system using mautrix-go bridg
 
 - ✅ **Bidirectional messaging** - Send and receive messages between Matrix and Hostex
 - ✅ **Real-time sync** - New messages appear in Matrix within 30 seconds
-- ✅ **Image attachments** - Images from Hostex display properly in Matrix
+- 🔧 **Image attachments** - Images from Hostex currently show as "(empty message)" - under investigation ([#5](https://github.com/keithah/matrix-hostex-bridge/issues/5))
 - ✅ **Property-prefixed rooms** - Rooms are named with property prefix: "(Property Name) - Guest Name"
 - ✅ **Beeper integration** - Full compatibility with Beeper's bridge-manager
 - ✅ **Message backfilling** - Historical messages are imported when creating rooms
