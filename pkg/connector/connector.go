@@ -30,7 +30,8 @@ admin_user: "@keithah:beeper.com"
 `
 
 var configUpgrader = configupgrade.SimpleUpgrader(func(helper configupgrade.Helper) {
-	// No upgrades needed yet for initial version
+	helper.Copy(configupgrade.Str, "hostex_api_url")
+	helper.Copy(configupgrade.Str, "admin_user")
 })
 
 type HostexConfig struct {
@@ -50,7 +51,17 @@ func (hc *HostexConnector) Init(bridge *bridgev2.Bridge) {
 
 func (hc *HostexConnector) Start(ctx context.Context) error {
 	hc.br.Log.Info().Msg("Starting Hostex connector")
-	
+
+	// Register HTTP endpoints for webhooks
+	if server, ok := hc.br.Matrix.(bridgev2.MatrixConnectorWithServer); ok {
+		r := server.GetRouter().PathPrefix("/_matrix/mau/hostex").Subrouter()
+		r.HandleFunc("/webhook", hc.handleWebhook).Methods("POST")
+		r.HandleFunc("/health", hc.handleHealth).Methods("GET")
+		hc.br.Log.Info().Msg("Registered HTTP endpoints for webhooks")
+	} else {
+		hc.br.Log.Warn().Msg("Matrix connector does not support HTTP server - webhooks disabled")
+	}
+
 	// Enable sync command for manual cleanup
 	cmdProcessor := hc.br.Commands.(*commands.Processor)
 	cmdProcessor.AddHandlers(
@@ -83,10 +94,10 @@ func (hc *HostexConnector) Start(ctx context.Context) error {
 		},
 	)
 	hc.br.Log.Info().Msg("Custom command handlers ENABLED for room cleanup")
-	
+
 	// Send startup notification to admin
 	go hc.sendStartupNotification(ctx)
-	
+
 	return nil
 }
 
@@ -95,9 +106,9 @@ func (hc *HostexConnector) GetName() bridgev2.BridgeName {
 	return bridgev2.BridgeName{
 		DisplayName:      "Hostex",
 		NetworkURL:       "https://hostex.io",
-		NetworkIcon:      "mxc://local.beeper.com/hostex-logo",  // Hostex logo from https://www.hotelminder.com/images/brand/Hostex.png
-		NetworkID:        "hostex",
-		BeeperBridgeType: "hostex",
+		NetworkIcon:      "mxc://local.beeper.com/hostex-logo", // Hostex logo from https://www.hotelminder.com/images/brand/Hostex.png
+		NetworkID:        "sh-hostex",
+		BeeperBridgeType: "sh-hostex",
 		DefaultPort:      29337,
 	}
 }
@@ -122,8 +133,8 @@ func (hc *HostexConnector) GetConfig() (example string, data any, upgrader confi
 func (hc *HostexConnector) GetDBMetaTypes() database.MetaTypes {
 	// Note: hc.br is nil during early initialization, can't log here
 	return database.MetaTypes{
-		Portal: func() any { return &HostexPortalMetadata{} },
-		Ghost:  func() any { return &HostexGhostMetadata{} },
+		Portal:    func() any { return &HostexPortalMetadata{} },
+		Ghost:     func() any { return &HostexGhostMetadata{} },
 		UserLogin: func() any { return &HostexUserLoginMetadata{} },
 	}
 }
@@ -151,7 +162,7 @@ func (hc *HostexConnector) CreateLogin(ctx context.Context, user *bridgev2.User,
 func (hc *HostexConnector) LoadUserLogin(ctx context.Context, login *bridgev2.UserLogin) error {
 	meta := login.Metadata.(*HostexUserLoginMetadata)
 	client := hostexapi.NewClient(meta.AccessToken)
-	
+
 	nl := &HostexNetworkAPI{
 		br:                      hc.br,
 		login:                   login,
@@ -161,29 +172,21 @@ func (hc *HostexConnector) LoadUserLogin(ctx context.Context, login *bridgev2.Us
 		conversationLastMsgTime: make(map[string]time.Time),
 		sentMessages:            make(map[string]time.Time),
 	}
-	
+
 	login.Client = nl
 	return nil
 }
 
 type HostexUserLoginMetadata struct {
 	AccessToken string `json:"access_token"`
-	UserID      string `json:"user_id"`
-	UserName    string `json:"user_name"`
 }
 
 type HostexPortalMetadata struct {
 	ConversationID string `json:"conversation_id"`
-	PropertyID     string `json:"property_id"`
-	PropertyName   string `json:"property_name"`
-	GuestName      string `json:"guest_name"`
-	GuestEmail     string `json:"guest_email"`
 }
 
 type HostexGhostMetadata struct {
-	Name  string `json:"name"`
-	Email string `json:"email"`
-	Phone string `json:"phone"`
+	Name string `json:"name"`
 }
 
 type HostexLogin struct {
@@ -214,48 +217,46 @@ func (hl *HostexLogin) Cancel() {}
 
 func (hl *HostexLogin) SubmitUserInput(ctx context.Context, input map[string]string) (*bridgev2.LoginStep, error) {
 	hl.br.Log.Info().Msg("SubmitUserInput: Starting Hostex login process")
-	
+
 	accessToken := input["access_token"]
 	if accessToken == "" {
 		hl.br.Log.Error().Msg("SubmitUserInput: Access token is empty")
 		return nil, fmt.Errorf("access token is required")
 	}
-	
+
 	hl.br.Log.Info().Int("token_length", len(accessToken)).Msg("SubmitUserInput: Got access token")
-	
+
 	// Test the API token by making a request
 	hl.br.Log.Info().Msg("SubmitUserInput: Testing API token with Hostex API")
 	client := hostexapi.NewClient(accessToken)
-	
+
 	// Test the connection by getting properties
 	properties, err := client.GetProperties(ctx)
 	if err != nil {
 		hl.br.Log.Error().Err(err).Msg("SubmitUserInput: Failed to authenticate with Hostex API")
 		return nil, fmt.Errorf("failed to authenticate with Hostex API: %w", err)
 	}
-	
+
 	hl.br.Log.Info().Int("property_count", len(properties)).Msg("SubmitUserInput: Successfully authenticated with Hostex API")
-	
+
 	// Create user login metadata
 	userLoginID := networkid.UserLoginID(fmt.Sprintf("hostex_%s", accessToken[:8])) // Use first 8 chars as ID
-	
+
 	// Create the user login
 	ul, err := hl.user.NewLogin(ctx, &database.UserLogin{
 		ID:         userLoginID,
-		RemoteName: "Hostex User", // We could fetch this from API if available
+		RemoteName: "Hostex User",
 		Metadata: &HostexUserLoginMetadata{
 			AccessToken: accessToken,
-			UserID:      string(userLoginID),
-			UserName:    "Hostex User",
 		},
 	}, nil)
 	if err != nil {
 		hl.br.Log.Error().Err(err).Msg("SubmitUserInput: Failed to create user login")
 		return nil, fmt.Errorf("failed to create user login: %w", err)
 	}
-	
+
 	hl.br.Log.Info().Str("login_id", string(ul.ID)).Msg("SubmitUserInput: Created user login successfully")
-	
+
 	// Return completion step
 	return &bridgev2.LoginStep{
 		Type:   bridgev2.LoginStepTypeComplete,
@@ -268,9 +269,9 @@ func (hl *HostexLogin) SubmitUserInput(ctx context.Context, input map[string]str
 }
 
 type HostexNetworkAPI struct {
-	br                *bridgev2.Bridge
-	login             *bridgev2.UserLogin
-	client            *hostexapi.Client
+	br                      *bridgev2.Bridge
+	login                   *bridgev2.UserLogin
+	client                  *hostexapi.Client
 	guestNames              map[string]string    // conversation ID -> guest name mapping
 	lastMessageTime         map[string]time.Time // conversation ID -> timestamp of last processed message
 	lastMessageTimeMu       sync.RWMutex         // protects lastMessageTime map
@@ -284,7 +285,7 @@ var _ bridgev2.NetworkAPI = (*HostexNetworkAPI)(nil)
 
 func (hn *HostexNetworkAPI) Connect(ctx context.Context) {
 	hn.br.Log.Info().Str("user_login", string(hn.login.ID)).Msg("Connecting to Hostex")
-	
+
 	// Start polling for conversations and messages
 	go hn.pollConversations(ctx)
 }
@@ -317,7 +318,7 @@ func (hn *HostexNetworkAPI) GetUserInfo(ctx context.Context, ghost *bridgev2.Gho
 	// Extract meaningful name from user ID
 	userIDStr := string(ghost.ID)
 	var name string
-	
+
 	if strings.HasPrefix(userIDStr, "host_") {
 		// Host user - use the logged-in user's name or "Host"
 		name = "Host"
@@ -337,7 +338,7 @@ func (hn *HostexNetworkAPI) GetUserInfo(ctx context.Context, ghost *bridgev2.Gho
 	} else {
 		name = "Unknown User"
 	}
-	
+
 	return &bridgev2.UserInfo{
 		Name: &name,
 	}, nil
@@ -347,13 +348,13 @@ func (hn *HostexNetworkAPI) GetCapabilities(ctx context.Context, portal *bridgev
 	return &event.RoomFeatures{
 		MaxTextLength:       4000,
 		LocationMessage:     event.CapLevelUnsupported,
-		Poll:               event.CapLevelUnsupported,
-		Thread:             event.CapLevelUnsupported,
-		Reply:              event.CapLevelFullySupported,
-		Edit:               event.CapLevelUnsupported,
-		Delete:             event.CapLevelUnsupported,
-		Reaction:           event.CapLevelUnsupported,
-		ReadReceipts:       false,
+		Poll:                event.CapLevelUnsupported,
+		Thread:              event.CapLevelUnsupported,
+		Reply:               event.CapLevelFullySupported,
+		Edit:                event.CapLevelUnsupported,
+		Delete:              event.CapLevelUnsupported,
+		Reaction:            event.CapLevelUnsupported,
+		ReadReceipts:        false,
 		TypingNotifications: false,
 	}
 }
@@ -365,21 +366,21 @@ func (hn *HostexNetworkAPI) HandleMatrixMessage(ctx context.Context, msg *bridge
 		Str("sender", string(msg.Event.Sender)).
 		Str("content", msg.Content.Body).
 		Msg("Received Matrix message to send to Hostex")
-	
+
 	// Get the portal to find the conversation ID
 	portal := msg.Portal
 	if portal == nil {
 		return nil, fmt.Errorf("no portal found for message")
 	}
-	
+
 	// Extract conversation ID from portal key
 	conversationID := string(portal.ID)
-	
+
 	hn.br.Log.Info().
 		Str("conversation_id", conversationID).
 		Str("content", msg.Content.Body).
 		Msg("Sending message to Hostex conversation")
-	
+
 	// Send message to Hostex
 	sentMessage, err := hn.client.SendMessage(ctx, conversationID, msg.Content.Body)
 	if err != nil {
@@ -388,18 +389,18 @@ func (hn *HostexNetworkAPI) HandleMatrixMessage(ctx context.Context, msg *bridge
 			Msg("Failed to send message to Hostex")
 		return nil, fmt.Errorf("failed to send message to Hostex: %w", err)
 	}
-	
+
 	// Track sent message to prevent echo
 	hn.sentMessagesMu.Lock()
 	hn.sentMessages[msg.Content.Body] = time.Now()
 	hn.sentMessagesMu.Unlock()
-	
+
 	hn.br.Log.Info().
 		Str("conversation_id", conversationID).
 		Str("message_id", sentMessage.ID).
 		Str("content", sentMessage.Content).
 		Msg("Successfully sent message to Hostex")
-	
+
 	// Return response with the sent message details
 	return &bridgev2.MatrixMessageResponse{
 		DB: &database.Message{
@@ -419,14 +420,14 @@ func (hn *HostexNetworkAPI) ResolveIdentifier(ctx context.Context, identifier st
 		if err != nil {
 			return nil, fmt.Errorf("failed to get conversations: %w", err)
 		}
-		
+
 		for _, conv := range conversations {
 			if conv.ID == identifier {
 				portalKey := networkid.PortalKey{
 					ID:       networkid.PortalID(conv.ID),
 					Receiver: hn.login.ID,
 				}
-				
+
 				return &bridgev2.ResolveIdentifierResponse{
 					Chat: &bridgev2.CreateChatResponse{
 						PortalKey: portalKey,
@@ -436,14 +437,14 @@ func (hn *HostexNetworkAPI) ResolveIdentifier(ctx context.Context, identifier st
 		}
 		return nil, fmt.Errorf("conversation not found: %s", identifier)
 	}
-	
+
 	return nil, fmt.Errorf("unknown identifier format: %s", identifier)
 }
 
 func (hn *HostexNetworkAPI) pollConversations(ctx context.Context) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -460,20 +461,20 @@ func (hn *HostexNetworkAPI) syncConversations(ctx context.Context) {
 		hn.br.Log.Error().Err(err).Msg("Failed to fetch conversations")
 		return
 	}
-	
+
 	// Only sync the last 10 conversations as requested by the user
 	if len(conversations) > 10 {
 		conversations = conversations[:10]
 	}
-	
+
 	hn.br.Log.Info().Int("conversation_count", len(conversations)).Msg("Checking conversations for new messages")
-	
+
 	for _, conv := range conversations {
 		// Check if we need to process this conversation based on last_message_at
 		hn.conversationLastMsgMu.RLock()
 		cachedLastMsgTime, hasCached := hn.conversationLastMsgTime[conv.ID]
 		hn.conversationLastMsgMu.RUnlock()
-		
+
 		// Skip if no new messages since last check
 		if hasCached && !conv.LastMessageAt.After(cachedLastMsgTime) {
 			hn.br.Log.Debug().
@@ -484,18 +485,18 @@ func (hn *HostexNetworkAPI) syncConversations(ctx context.Context) {
 				Msg("Skipping conversation - no new messages")
 			continue
 		}
-		
+
 		hn.br.Log.Info().
 			Str("conversation_id", conv.ID).
 			Str("guest_name", conv.Guest.Name).
 			Str("last_message_at", conv.LastMessageAt.String()).
 			Msg("Processing conversation with new messages")
-		
+
 		// Update cached timestamp
 		hn.conversationLastMsgMu.Lock()
 		hn.conversationLastMsgTime[conv.ID] = conv.LastMessageAt
 		hn.conversationLastMsgMu.Unlock()
-		
+
 		// Process this conversation
 		hn.processConversation(ctx, conv)
 	}
@@ -507,7 +508,7 @@ func (hn *HostexNetworkAPI) processConversation(ctx context.Context, conv hostex
 		ID:       networkid.PortalID(conv.ID),
 		Receiver: hn.login.ID,
 	}
-	
+
 	// Check if this portal has a Matrix room created
 	portal, err := hn.br.GetExistingPortalByKey(ctx, portalKey)
 	hn.br.Log.Debug().
@@ -521,7 +522,7 @@ func (hn *HostexNetworkAPI) processConversation(ctx context.Context, conv hostex
 		}()).
 		Str("portal_key", portalKey.String()).
 		Msg("Portal check result")
-	
+
 	// Get conversation details to fetch property name and messages (only when needed)
 	hn.br.Log.Debug().Str("conversation_id", conv.ID).Msg("Fetching conversation details from Hostex API")
 	details, err := hn.client.GetConversationDetails(ctx, conv.ID)
@@ -530,28 +531,28 @@ func (hn *HostexNetworkAPI) processConversation(ctx context.Context, conv hostex
 		return
 	}
 	hn.br.Log.Debug().Str("conversation_id", conv.ID).Int("message_count", len(details.Messages)).Msg("Got conversation details from Hostex API")
-	
+
 	// Get property name from activities (use first activity with a property)
 	propertyName := "Unknown Property"
 	if len(details.Activities) > 0 && details.Activities[0].Property.Title != "" {
 		propertyName = details.Activities[0].Property.Title
 	}
-	
+
 	// Store guest name for later use
 	hn.guestNames[conv.ID] = conv.Guest.Name
-	
+
 	// Create room name with format "(Property) - Guest Name"
 	roomName := fmt.Sprintf("(%s) - %s", propertyName, conv.Guest.Name)
 
 	if err != nil || portal == nil || portal.MXID == "" {
 		hn.br.Log.Info().Str("conversation_id", conv.ID).Str("guest_name", conv.Guest.Name).Msg("Creating Matrix room for conversation with backfill")
-		
+
 		// Send a chat info change event to trigger Matrix room creation
 		chatInfo := &bridgev2.ChatInfo{
 			Name:  &roomName,
 			Topic: &propertyName,
 		}
-		
+
 		// Create a remote event to trigger portal and Matrix room creation
 		remoteEvent := &bridgev2.SimpleRemoteEvent[*bridgev2.ChatInfoChange]{
 			Type:         bridgev2.RemoteEventChatInfoChange,
@@ -569,17 +570,17 @@ func (hn *HostexNetworkAPI) processConversation(ctx context.Context, conv hostex
 				ChatInfo: chatInfo,
 			},
 		}
-		
+
 		// Send the remote event to create the Matrix room
 		hn.br.QueueRemoteEvent(hn.login, remoteEvent)
-		
+
 		// Queue message backfill events for new rooms
 		hn.br.Log.Debug().Int("message_count", len(details.Messages)).Msg("Queueing messages for new portal")
 		for i := len(details.Messages) - 1; i >= 0; i-- {
 			msg := details.Messages[i]
 			hn.queueMessageEvent(ctx, portalKey, &msg, conv.ID, conv.Guest.Name)
 		}
-		
+
 		hn.br.Log.Info().
 			Str("conversation_id", conv.ID).
 			Str("room_name", roomName).
@@ -591,13 +592,13 @@ func (hn *HostexNetworkAPI) processConversation(ctx context.Context, conv hostex
 			Str("matrix_room_id", portal.MXID.String()).
 			Str("new_room_name", roomName).
 			Msg("Processing existing Matrix room for new messages")
-		
+
 		// Send chat info update for existing room
 		chatInfo := &bridgev2.ChatInfo{
 			Name:  &roomName,
 			Topic: &propertyName,
 		}
-		
+
 		chatInfoEvent := &bridgev2.SimpleRemoteEvent[*bridgev2.ChatInfoChange]{
 			Type:         bridgev2.RemoteEventChatInfoChange,
 			PortalKey:    portalKey,
@@ -614,15 +615,15 @@ func (hn *HostexNetworkAPI) processConversation(ctx context.Context, conv hostex
 				ChatInfo: chatInfo,
 			},
 		}
-		
+
 		// Update the room info
 		hn.br.QueueRemoteEvent(hn.login, chatInfoEvent)
-		
+
 		// For existing rooms, only queue messages that are newer than the last processed message
 		hn.lastMessageTimeMu.RLock()
 		lastProcessedTime, hasLastTime := hn.lastMessageTime[conv.ID]
 		hn.lastMessageTimeMu.RUnlock()
-		
+
 		if !hasLastTime {
 			// First time seeing this conversation, set baseline to oldest message to avoid flooding
 			if len(details.Messages) > 0 {
@@ -633,19 +634,19 @@ func (hn *HostexNetworkAPI) processConversation(ctx context.Context, conv hostex
 				lastProcessedTime = oldestMsg.CreatedAt
 			}
 		}
-		
+
 		newMessageCount := 0
 		latestMessageTime := lastProcessedTime
-		
+
 		// Process all messages, but only queue ones newer than lastProcessedTime
 		for i := len(details.Messages) - 1; i >= 0; i-- {
 			msg := details.Messages[i]
-			
+
 			// Track the latest message time
 			if msg.CreatedAt.After(latestMessageTime) {
 				latestMessageTime = msg.CreatedAt
 			}
-			
+
 			// Only queue messages that are newer than the last processed time
 			if msg.CreatedAt.After(lastProcessedTime) {
 				hn.br.Log.Info().
@@ -656,19 +657,19 @@ func (hn *HostexNetworkAPI) processConversation(ctx context.Context, conv hostex
 					Str("created_at", msg.CreatedAt.String()).
 					Str("last_processed", lastProcessedTime.String()).
 					Msg("Found new message to queue")
-				
+
 				hn.queueMessageEvent(ctx, portalKey, &msg, conv.ID, conv.Guest.Name)
 				newMessageCount++
 			}
 		}
-		
+
 		// Update the last processed time
 		if latestMessageTime.After(lastProcessedTime) {
 			hn.lastMessageTimeMu.Lock()
 			hn.lastMessageTime[conv.ID] = latestMessageTime
 			hn.lastMessageTimeMu.Unlock()
 		}
-		
+
 		hn.br.Log.Info().
 			Str("conversation_id", conv.ID).
 			Int("new_messages", newMessageCount).
@@ -704,21 +705,21 @@ func (hn *HostexNetworkAPI) queueMessageEvent(ctx context.Context, portalKey net
 		}
 		hn.sentMessagesMu.RUnlock()
 	}
-	
+
 	// Determine sender
 	var senderID networkid.UserID
 	var isFromMe bool
-	
+
 	if msg.SenderRole == "host" {
 		// Host message - use double puppeting to show as sent by the actual Matrix user
-		senderID = "" // Empty senderID with isFromMe=true enables double puppeting
+		senderID = networkid.UserID("host_" + string(hn.login.ID))
 		isFromMe = true
 	} else {
 		// Guest message
 		senderID = networkid.UserID("guest_" + conversationID)
 		isFromMe = false
 	}
-	
+
 	// Create message event
 	messageEvent := &bridgev2.SimpleRemoteEvent[*hostexapi.Message]{
 		Type:      bridgev2.RemoteEventMessage,
@@ -729,14 +730,19 @@ func (hn *HostexNetworkAPI) queueMessageEvent(ctx context.Context, portalKey net
 			return c.Str("message_id", msg.ID).Str("sender_role", msg.SenderRole)
 		},
 		Sender: bridgev2.EventSender{
-			IsFromMe:    isFromMe,
-			SenderLogin: hn.login.ID, // Set the user login for double puppeting
-			Sender:      senderID,
+			IsFromMe: isFromMe,
+			SenderLogin: func() networkid.UserLoginID {
+				if isFromMe {
+					return hn.login.ID
+				}
+				return ""
+			}(),
+			Sender: senderID,
 		},
 		Data: msg,
 		ConvertMessageFunc: func(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, data *hostexapi.Message) (*bridgev2.ConvertedMessage, error) {
 			parts := []*bridgev2.ConvertedMessagePart{}
-			
+
 			// Handle text content
 			if data.Content != "" {
 				parts = append(parts, &bridgev2.ConvertedMessagePart{
@@ -747,7 +753,7 @@ func (hn *HostexNetworkAPI) queueMessageEvent(ctx context.Context, portalKey net
 					},
 				})
 			}
-			
+
 			// Handle attachments (images, files, etc.)
 			if data.Attachment != nil {
 				// Try to parse attachment as an object
@@ -762,14 +768,14 @@ func (hn *HostexNetworkAPI) queueMessageEvent(ctx context.Context, portalKey net
 							if name, ok := attachmentObj["filename"].(string); name != "" && ok {
 								filename = name
 							}
-							
+
 							msgType := event.MsgFile
 							if attachmentType, ok := attachmentObj["type"].(string); ok {
 								if strings.HasPrefix(attachmentType, "image/") {
 									msgType = event.MsgImage
 								}
 							}
-							
+
 							// Download the image
 							resp, err := http.Get(url)
 							if err != nil {
@@ -797,12 +803,12 @@ func (hn *HostexNetworkAPI) queueMessageEvent(ctx context.Context, portalKey net
 									if mimeType == "" {
 										mimeType = "application/octet-stream"
 									}
-									
+
 									// Update msgType based on actual MIME type from HTTP response
 									if strings.HasPrefix(mimeType, "image/") {
 										msgType = event.MsgImage
 									}
-									
+
 									mxcURL, _, err := intent.UploadMedia(ctx, portal.MXID, imageData, filename, mimeType)
 									if err != nil {
 										parts = append(parts, &bridgev2.ConvertedMessagePart{
@@ -856,7 +862,7 @@ func (hn *HostexNetworkAPI) queueMessageEvent(ctx context.Context, portalKey net
 								if mimeType == "" {
 									mimeType = "application/octet-stream"
 								}
-								
+
 								// Determine message type and filename based on MIME type
 								msgType := event.MsgFile
 								filename := "attachment"
@@ -876,7 +882,7 @@ func (hn *HostexNetworkAPI) queueMessageEvent(ctx context.Context, portalKey net
 										filename = "image"
 									}
 								}
-								
+
 								mxcURL, _, err := intent.UploadMedia(ctx, portal.MXID, imageData, filename, mimeType)
 								if err != nil {
 									parts = append(parts, &bridgev2.ConvertedMessagePart{
@@ -901,7 +907,7 @@ func (hn *HostexNetworkAPI) queueMessageEvent(ctx context.Context, portalKey net
 					}
 				}
 			}
-			
+
 			// If no parts were created, add a default text message
 			if len(parts) == 0 {
 				parts = append(parts, &bridgev2.ConvertedMessagePart{
@@ -912,13 +918,13 @@ func (hn *HostexNetworkAPI) queueMessageEvent(ctx context.Context, portalKey net
 					},
 				})
 			}
-			
+
 			return &bridgev2.ConvertedMessage{
 				Parts: parts,
 			}, nil
 		},
 	}
-	
+
 	// Queue the message event
 	hn.br.QueueRemoteEvent(hn.login, messageEvent)
 }
@@ -928,7 +934,7 @@ func (hn *HostexNetworkAPI) getPortalForConversation(conv *hostexapi.Conversatio
 		ID:       networkid.PortalID(conv.ID),
 		Receiver: hn.login.ID,
 	}
-	
+
 	// Try to get existing portal
 	portal, err := hn.br.GetExistingPortalByKey(context.Background(), portalKey)
 	if err != nil {
@@ -936,18 +942,18 @@ func (hn *HostexNetworkAPI) getPortalForConversation(conv *hostexapi.Conversatio
 		// Portal will be created when needed by the bridge framework
 		return nil
 	}
-	
+
 	return portal
 }
 
 func (hn *HostexNetworkAPI) handleMessage(ctx context.Context, portal *bridgev2.Portal, msg *hostexapi.Message, conversationID string) {
 	var senderID networkid.UserID
 	if msg.SenderRole == "host" {
-		senderID = networkid.UserID("host_" + hn.login.Metadata.(*HostexUserLoginMetadata).UserID)
+		senderID = networkid.UserID("host_" + string(hn.login.ID))
 	} else {
 		senderID = networkid.UserID("guest_" + conversationID)
 	}
-	
+
 	// TODO: Convert message to Matrix format and send
 	hn.br.Log.Debug().
 		Str("conversation_id", conversationID).
@@ -956,36 +962,34 @@ func (hn *HostexNetworkAPI) handleMessage(ctx context.Context, portal *bridgev2.
 		Msg("Received message")
 }
 
-
-
 // sendStartupNotification sends a message to the admin user when the bridge starts
 func (hc *HostexConnector) sendStartupNotification(ctx context.Context) {
 	// Wait a moment for the bridge to fully initialize
 	time.Sleep(5 * time.Second)
-	
+
 	// Use hardcoded admin user for now since config access is complex
 	adminUserID := "@keithah:beeper.com"
 	if adminUserID == "" {
 		hc.br.Log.Debug().Msg("No admin user configured, skipping startup notification")
 		return
 	}
-	
+
 	hc.br.Log.Info().Str("admin_user", adminUserID).Msg("Sending startup notification to admin")
-	
+
 	// Get or create user
 	user, err := hc.br.GetUserByMXID(ctx, id.UserID(adminUserID))
 	if err != nil {
 		hc.br.Log.Error().Err(err).Str("admin_user", adminUserID).Msg("Failed to get admin user")
 		return
 	}
-	
+
 	// Get or create management room
 	managementRoom, err := user.GetManagementRoom(ctx)
 	if err != nil {
 		hc.br.Log.Error().Err(err).Str("admin_user", adminUserID).Msg("Failed to get management room")
 		return
 	}
-	
+
 	// Create the startup message content
 	content := &event.Content{
 		Parsed: &event.MessageEventContent{
@@ -1003,18 +1007,18 @@ Bridge Info:
 • Status: Online
 
 Send help for more commands.`,
-			Format: event.FormatHTML,
+			Format:        event.FormatHTML,
 			FormattedBody: `<strong>🏠 Hostex Bridge Started</strong><br/><br/>✅ Bridge is now running and ready to connect Hostex conversations to Matrix<br/>📱 To get started, send me your Hostex API token with: <code>login</code><br/>🔗 I'll sync all your property conversations and create Matrix rooms for each guest<br/><br/><strong>Bridge Info:</strong><br/>• Version: 0.1.0<br/>• Bridge ID: sh-hostex<br/>• Bot: @sh-hostexbot:beeper.local<br/>• Status: Online<br/><br/>Send <code>help</code> for more commands.`,
 		},
 	}
-	
+
 	// Send the notification message
 	_, err = hc.br.Bot.SendMessage(ctx, managementRoom, event.EventMessage, content, nil)
 	if err != nil {
 		hc.br.Log.Error().Err(err).Str("admin_user", adminUserID).Msg("Failed to send startup notification")
 		return
 	}
-	
+
 	hc.br.Log.Info().Str("admin_user", adminUserID).Str("room_id", managementRoom.String()).Msg("Startup notification sent successfully")
 }
 
@@ -1026,14 +1030,14 @@ func (hc *HostexConnector) handlePingCommand(ce *commands.Event) {
 // handleSyncCommand handles the sync command
 func (hc *HostexConnector) handleSyncCommand(ce *commands.Event) {
 	ce.Reply("🔄 Starting sync of Hostex conversations with room cleanup...")
-	
+
 	// Get the user's logins
 	logins := ce.User.GetUserLogins()
 	if len(logins) == 0 {
 		ce.Reply("❌ No active logins found. Please login first.")
 		return
 	}
-	
+
 	// Force sync for each login
 	for _, login := range logins {
 		if login.Client != nil {
@@ -1042,21 +1046,21 @@ func (hc *HostexConnector) handleSyncCommand(ce *commands.Event) {
 			}
 		}
 	}
-	
+
 	ce.Reply("✅ Sync initiated for all your Hostex logins with room updates.")
 }
 
 // handleRefreshCommand handles the refresh command
 func (hc *HostexConnector) handleRefreshCommand(ce *commands.Event) {
 	ce.Reply("🔄 Refreshing conversation cache and checking for new messages...")
-	
+
 	// Get the user's logins
 	logins := ce.User.GetUserLogins()
 	if len(logins) == 0 {
 		ce.Reply("❌ No active logins found. Please login first.")
 		return
 	}
-	
+
 	// Clear conversation cache and force refresh for each login
 	for _, login := range logins {
 		if login.Client != nil {
@@ -1068,27 +1072,27 @@ func (hc *HostexConnector) handleRefreshCommand(ce *commands.Event) {
 					delete(hostexAPI.conversationLastMsgTime, k)
 				}
 				hostexAPI.conversationLastMsgMu.Unlock()
-				
+
 				// Run sync which will now re-process all conversations
 				go hostexAPI.syncConversations(ce.Ctx)
 			}
 		}
 	}
-	
+
 	ce.Reply("✅ Conversation cache cleared and refresh initiated for all your Hostex logins.")
 }
 
 // handleCleanupCommand handles the cleanup-rooms command
 func (hc *HostexConnector) handleCleanupCommand(ce *commands.Event) {
 	ce.Reply("🧹 Starting room cleanup and re-backfill...")
-	
+
 	// Get the user's logins
 	logins := ce.User.GetUserLogins()
 	if len(logins) == 0 {
 		ce.Reply("❌ No active logins found. Please login first.")
 		return
 	}
-	
+
 	// Force cleanup and sync for each login
 	for _, login := range logins {
 		if login.Client != nil {
@@ -1100,8 +1104,43 @@ func (hc *HostexConnector) handleCleanupCommand(ce *commands.Event) {
 			}
 		}
 	}
-	
+
 	ce.Reply("✅ Room cleanup and re-backfill initiated. Room names will be updated and messages re-processed with double puppeting and attachment support.")
 }
 
+// handleWebhook handles incoming webhooks from Hostex
+func (hc *HostexConnector) handleWebhook(w http.ResponseWriter, r *http.Request) {
+	hc.br.Log.Info().Str("method", r.Method).Str("path", r.URL.Path).Msg("Received webhook")
 
+	// Read the request body
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		hc.br.Log.Error().Err(err).Msg("Failed to read webhook body")
+		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	// Log the webhook data for debugging
+	hc.br.Log.Debug().Str("body", string(body)).Msg("Webhook payload received")
+
+	// TODO: Parse webhook data and trigger appropriate bridge actions
+	// For now, just acknowledge receipt
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "received",
+		"bridge": "mautrix-hostex",
+	})
+}
+
+// handleHealth handles health check requests
+func (hc *HostexConnector) handleHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":    "healthy",
+		"bridge":    "mautrix-hostex",
+		"timestamp": time.Now().Format(time.RFC3339),
+	})
+}
