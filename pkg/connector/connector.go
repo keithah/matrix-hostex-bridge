@@ -756,37 +756,76 @@ func (hn *HostexNetworkAPI) queueMessageEvent(ctx context.Context, portalKey net
 
 			// Handle attachments (images, files, etc.)
 			if data.Attachment != nil {
-				// Debug: Log attachment data structure
-				portal.Bridge.Log.Debug().Interface("attachment", data.Attachment).Str("message_id", data.ID).Msg("Processing attachment")
+				// Debug: Log attachment data structure and type
+				attachmentType := fmt.Sprintf("%T", data.Attachment)
+				portal.Bridge.Log.Debug().Interface("attachment", data.Attachment).Str("message_id", data.ID).Str("attachment_type", attachmentType).Msg("Processing attachment")
+				
+				var attachmentURL, filename, mimeType string
+				var processed bool
 				
 				// Try to parse attachment as an object
 				attachmentBytes, err := json.Marshal(data.Attachment)
 				if err == nil {
 					var attachmentObj map[string]interface{}
 					if err := json.Unmarshal(attachmentBytes, &attachmentObj); err == nil {
-						// Handle image attachments
-						if url, ok := attachmentObj["url"].(string); ok && url != "" {
-							// Try to get filename and type
-							filename := "attachment"
-							if name, ok := attachmentObj["filename"].(string); name != "" && ok {
-								filename = name
+						portal.Bridge.Log.Debug().Interface("parsed_attachment", attachmentObj).Str("message_id", data.ID).Msg("Successfully parsed attachment as object")
+						
+						// Handle image attachments - try multiple URL field names (Hostex uses "fullback_url")
+						for _, urlField := range []string{"fullback_url", "url", "URL", "src", "href", "link"} {
+							if url, ok := attachmentObj[urlField].(string); ok && url != "" {
+								attachmentURL = url
+								break
 							}
-
-							msgType := event.MsgFile
-							if attachmentType, ok := attachmentObj["type"].(string); ok {
-								if strings.HasPrefix(attachmentType, "image/") {
-									msgType = event.MsgImage
+						}
+						
+						if attachmentURL != "" {
+							// Try to get filename - check multiple field names or generate from URL
+							filename = "attachment"
+							for _, nameField := range []string{"filename", "name", "title"} {
+								if name, ok := attachmentObj[nameField].(string); name != "" && ok {
+									filename = name
+									break
+								}
+							}
+							
+							// If no filename found, try to extract from URL
+							if filename == "attachment" && attachmentURL != "" {
+								if lastSlash := strings.LastIndex(attachmentURL, "/"); lastSlash != -1 {
+									urlFilename := attachmentURL[lastSlash+1:]
+									if urlFilename != "" && !strings.Contains(urlFilename, "?") {
+										filename = urlFilename
+									} else if strings.Contains(urlFilename, "?") {
+										// Extract filename before query parameters
+										if qIndex := strings.Index(urlFilename, "?"); qIndex != -1 {
+											filename = urlFilename[:qIndex]
+										}
+									}
 								}
 							}
 
-							// Download the image
-							resp, err := http.Get(url)
+							// Try to get mime type from attachment object
+							for _, typeField := range []string{"type", "mime_type", "mimeType", "content_type"} {
+								if attachType, ok := attachmentObj[typeField].(string); ok && attachType != "" {
+									// Convert Hostex "image" type to proper MIME type
+									if attachType == "image" {
+										mimeType = "image/jpeg" // Default for Hostex images
+									} else {
+										mimeType = attachType
+									}
+									break
+								}
+							}
+
+							portal.Bridge.Log.Debug().Str("attachment_url", attachmentURL).Str("filename", filename).Str("mime_type", mimeType).Str("message_id", data.ID).Msg("Extracted attachment details")
+
+							// Download the attachment
+							resp, err := http.Get(attachmentURL)
 							if err != nil {
 								parts = append(parts, &bridgev2.ConvertedMessagePart{
 									Type: event.EventMessage,
 									Content: &event.MessageEventContent{
 										MsgType: event.MsgText,
-										Body:    fmt.Sprintf("📎 %s: %s (download failed)", filename, url),
+										Body:    fmt.Sprintf("📎 %s: %s (download failed)", filename, attachmentURL),
 									},
 								})
 							} else {
@@ -797,17 +836,20 @@ func (hn *HostexNetworkAPI) queueMessageEvent(ctx context.Context, portalKey net
 										Type: event.EventMessage,
 										Content: &event.MessageEventContent{
 											MsgType: event.MsgText,
-											Body:    fmt.Sprintf("📎 %s: %s (read failed)", filename, url),
+											Body:    fmt.Sprintf("📎 %s: %s (read failed)", filename, attachmentURL),
 										},
 									})
 								} else {
 									// Upload to Matrix
-									mimeType := resp.Header.Get("Content-Type")
-									if mimeType == "" {
+									responseMimeType := resp.Header.Get("Content-Type")
+									if responseMimeType != "" {
+										mimeType = responseMimeType
+									} else if mimeType == "" {
 										mimeType = "application/octet-stream"
 									}
 
-									// Update msgType based on actual MIME type from HTTP response
+									// Determine message type based on MIME type
+									msgType := event.MsgFile
 									if strings.HasPrefix(mimeType, "image/") {
 										msgType = event.MsgImage
 									}
@@ -818,7 +860,7 @@ func (hn *HostexNetworkAPI) queueMessageEvent(ctx context.Context, portalKey net
 											Type: event.EventMessage,
 											Content: &event.MessageEventContent{
 												MsgType: event.MsgText,
-												Body:    fmt.Sprintf("📎 %s: %s (upload failed)", filename, url),
+												Body:    fmt.Sprintf("📎 %s: %s (upload failed)", filename, attachmentURL),
 											},
 										})
 									} else {
@@ -830,15 +872,27 @@ func (hn *HostexNetworkAPI) queueMessageEvent(ctx context.Context, portalKey net
 												URL:     id.ContentURIString(string(mxcURL)),
 											},
 										})
+										processed = true
+										portal.Bridge.Log.Debug().Str("mxc_url", string(mxcURL)).Str("filename", filename).Str("mime_type", mimeType).Str("message_id", data.ID).Msg("Successfully processed attachment")
 									}
 								}
 							}
+							processed = true
 						}
+					} else {
+						portal.Bridge.Log.Debug().Str("message_id", data.ID).Str("error", err.Error()).Msg("Failed to unmarshal attachment as object")
 					}
 				} else {
+					portal.Bridge.Log.Debug().Str("message_id", data.ID).Str("error", err.Error()).Msg("Failed to marshal attachment for parsing")
+				}
+				
+				// If object parsing failed, try string parsing
+				if !processed {
 					// Handle attachment as string (URL)
 					if attachmentStr, ok := data.Attachment.(string); ok && attachmentStr != "" {
-						// Download the image
+						portal.Bridge.Log.Debug().Str("attachment_string", attachmentStr).Str("message_id", data.ID).Msg("Processing attachment as string URL")
+						
+						// Download the attachment
 						resp, err := http.Get(attachmentStr)
 						if err != nil {
 							parts = append(parts, &bridgev2.ConvertedMessagePart{
@@ -904,9 +958,15 @@ func (hn *HostexNetworkAPI) queueMessageEvent(ctx context.Context, portalKey net
 											URL:     id.ContentURIString(string(mxcURL)),
 										},
 									})
+									processed = true
+									portal.Bridge.Log.Debug().Str("mxc_url", string(mxcURL)).Str("filename", filename).Str("mime_type", mimeType).Str("message_id", data.ID).Msg("Successfully processed string attachment")
 								}
 							}
 						}
+						processed = true
+					} else {
+						// Log unhandled attachment types
+						portal.Bridge.Log.Debug().Str("message_id", data.ID).Interface("attachment", data.Attachment).Str("attachment_type", attachmentType).Msg("Unhandled attachment type - not a string or parseable object")
 					}
 				}
 			}
