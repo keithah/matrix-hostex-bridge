@@ -1,0 +1,71 @@
+version: '3.8'
+
+services:
+  hostex-bridge:
+    image: keithah/mautrix-hostex:latest
+    container_name: mautrix-hostex
+    restart: unless-stopped
+    
+    # Environment variables
+    environment:
+      - UID=1000
+      - GID=1000
+      - BRIDGEV2=1
+    
+    # Volume mounts
+    volumes:
+      - ./data:/data
+      - ./logs:/data/logs
+    
+    # Network configuration
+    ports:
+      - "29337:29337"  # Bridge port (adjust if needed)
+    
+    # Resource limits (optional)
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:29337/_matrix/mau/hostex/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Optional: Add a database if you want to persist bridge data
+  # postgres:
+  #   image: postgres:15-alpine
+  #   container_name: hostex-postgres
+  #   restart: unless-stopped
+  #   environment:
+  #     POSTGRES_DB: mautrix_hostex
+  #     POSTGRES_USER: mautrix
+  #     POSTGRES_PASSWORD: your-secure-password-here
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   ports:
+  #     - "5432:5432"
+
+# Volumes
+volumes:
+  # postgres_data:  # Uncomment if using PostgreSQL
+  hostex_data:
+    driver: local
+
+networks:
+  default:
+    name: hostex-bridge-network
