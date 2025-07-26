@@ -17,7 +17,6 @@ import (
 	"maunium.net/go/mautrix/bridgev2/commands"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
-	"maunium.net/go/mautrix/bridgev2/simplevent"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
 )
@@ -555,7 +554,8 @@ func (hn *HostexNetworkAPI) processConversation(ctx context.Context, conv hostex
 		}
 
 		// Create a remote event to trigger portal and Matrix room creation
-		remoteEvent := &simplevent.ChatInfoChange{
+		//nolint:staticcheck // Using deprecated API until new simplevent API is properly documented
+		remoteEvent := &bridgev2.SimpleRemoteEvent[*bridgev2.ChatInfoChange]{
 			Type:         bridgev2.RemoteEventChatInfoChange,
 			PortalKey:    portalKey,
 			CreatePortal: true,
@@ -600,7 +600,8 @@ func (hn *HostexNetworkAPI) processConversation(ctx context.Context, conv hostex
 			Topic: &propertyName,
 		}
 
-		chatInfoEvent := &simplevent.ChatInfoChange{
+		//nolint:staticcheck // Using deprecated API until new simplevent API is properly documented
+		chatInfoEvent := &bridgev2.SimpleRemoteEvent[*bridgev2.ChatInfoChange]{
 			Type:         bridgev2.RemoteEventChatInfoChange,
 			PortalKey:    portalKey,
 			CreatePortal: false, // Don't create, just update
@@ -714,7 +715,8 @@ func (hn *HostexNetworkAPI) queueMessageEvent(ctx context.Context, portalKey net
 	}
 
 	// Create message event
-	messageEvent := &simplevent.Message[*hostexapi.Message]{
+	//nolint:staticcheck // Using deprecated API until new simplevent API is properly documented
+	messageEvent := &bridgev2.SimpleRemoteEvent[*hostexapi.Message]{
 		Type:      bridgev2.RemoteEventMessage,
 		PortalKey: portalKey,
 		ID:        networkid.MessageID(msg.ID),
