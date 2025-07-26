@@ -63,21 +63,46 @@ jobs:
         fi
         echo "build_time=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
 
-    - name: Build and push Docker image
+    - name: Build and push AMD64 image (priority)
       uses: docker/build-push-action@v5
       with:
         context: .
-        platforms: linux/amd64,linux/arm64
+        platforms: linux/amd64
         push: true
-        tags: ${{ steps.meta.outputs.tags }}
-        labels: ${{ steps.meta.outputs.labels }}
+        tags: ${{ env.IMAGE_NAME }}:latest-amd64
         build-args: |
           TAG=${{ steps.build_info.outputs.tag }}
           COMMIT=${{ steps.build_info.outputs.commit }}
           BUILD_TIME=${{ steps.build_info.outputs.build_time }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
-        outputs: type=registry,annotation-index.org.opencontainers.image.ref.name=${{ env.IMAGE_NAME }}:latest
+        cache-from: type=gha,scope=amd64
+        cache-to: type=gha,mode=max,scope=amd64
+
+    - name: Build and push ARM64 image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        platforms: linux/arm64
+        push: true
+        tags: ${{ env.IMAGE_NAME }}:latest-arm64
+        build-args: |
+          TAG=${{ steps.build_info.outputs.tag }}
+          COMMIT=${{ steps.build_info.outputs.commit }}
+          BUILD_TIME=${{ steps.build_info.outputs.build_time }}
+        cache-from: type=gha,scope=arm64
+        cache-to: type=gha,mode=max,scope=arm64
+
+    - name: Create and push multi-arch manifest
+      run: |
+        docker buildx imagetools create -t ${{ env.IMAGE_NAME }}:latest \
+          ${{ env.IMAGE_NAME }}:latest-amd64 \
+          ${{ env.IMAGE_NAME }}:latest-arm64
+        
+        # Also create versioned tags if this is a release
+        if [ "${{ github.event_name }}" == "release" ]; then
+          docker buildx imagetools create -t ${{ env.IMAGE_NAME }}:${{ github.event.release.tag_name }} \
+            ${{ env.IMAGE_NAME }}:latest-amd64 \
+            ${{ env.IMAGE_NAME }}:latest-arm64
+        fi
 
     - name: Update Docker Hub description
       uses: peter-evans/dockerhub-description@v4
