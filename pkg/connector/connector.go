@@ -1160,9 +1160,11 @@ func (hc *HostexConnector) handleWebhook(w http.ResponseWriter, r *http.Request)
 func (hc *HostexConnector) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":    "healthy",
 		"bridge":    "mautrix-hostex",
 		"timestamp": time.Now().Format(time.RFC3339),
-	})
+	}); err != nil {
+		hc.br.Log.Error().Err(err).Msg("Failed to encode health check response")
+	}
 }
