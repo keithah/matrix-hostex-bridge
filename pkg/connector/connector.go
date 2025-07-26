@@ -17,6 +17,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/commands"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
+	"maunium.net/go/mautrix/bridgev2/simplevent"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
 )
@@ -554,7 +555,7 @@ func (hn *HostexNetworkAPI) processConversation(ctx context.Context, conv hostex
 		}
 
 		// Create a remote event to trigger portal and Matrix room creation
-		remoteEvent := &bridgev2.SimpleRemoteEvent[*bridgev2.ChatInfoChange]{
+		remoteEvent := &simplevent.ChatInfoChange{
 			Type:         bridgev2.RemoteEventChatInfoChange,
 			PortalKey:    portalKey,
 			CreatePortal: true,
@@ -599,7 +600,7 @@ func (hn *HostexNetworkAPI) processConversation(ctx context.Context, conv hostex
 			Topic: &propertyName,
 		}
 
-		chatInfoEvent := &bridgev2.SimpleRemoteEvent[*bridgev2.ChatInfoChange]{
+		chatInfoEvent := &simplevent.ChatInfoChange{
 			Type:         bridgev2.RemoteEventChatInfoChange,
 			PortalKey:    portalKey,
 			CreatePortal: false, // Don't create, just update
@@ -679,14 +680,6 @@ func (hn *HostexNetworkAPI) processConversation(ctx context.Context, conv hostex
 	}
 }
 
-func (hn *HostexNetworkAPI) clearPortalMessages(ctx context.Context, portal *bridgev2.Portal) {
-	// This is a placeholder - in a real implementation we'd need to delete existing messages
-	// For now, we'll rely on message deduplication by using consistent message IDs
-	hn.br.Log.Info().
-		Str("portal_id", string(portal.ID)).
-		Str("matrix_room_id", portal.MXID.String()).
-		Msg("Clearing portal for re-backfill (using message deduplication)")
-}
 
 func (hn *HostexNetworkAPI) queueMessageEvent(ctx context.Context, portalKey networkid.PortalKey, msg *hostexapi.Message, conversationID string, guestName string) {
 	// Check if this is a host message that was recently sent from Matrix (to prevent echo)
@@ -721,7 +714,7 @@ func (hn *HostexNetworkAPI) queueMessageEvent(ctx context.Context, portalKey net
 	}
 
 	// Create message event
-	messageEvent := &bridgev2.SimpleRemoteEvent[*hostexapi.Message]{
+	messageEvent := &simplevent.Message[*hostexapi.Message]{
 		Type:      bridgev2.RemoteEventMessage,
 		PortalKey: portalKey,
 		ID:        networkid.MessageID(msg.ID),
@@ -877,7 +870,6 @@ func (hn *HostexNetworkAPI) queueMessageEvent(ctx context.Context, portalKey net
 									}
 								}
 							}
-							processed = true
 						}
 					} else {
 						portal.Bridge.Log.Debug().Str("message_id", data.ID).Str("error", err.Error()).Msg("Failed to unmarshal attachment as object")
@@ -958,12 +950,10 @@ func (hn *HostexNetworkAPI) queueMessageEvent(ctx context.Context, portalKey net
 											URL:     id.ContentURIString(string(mxcURL)),
 										},
 									})
-									processed = true
 									portal.Bridge.Log.Debug().Str("mxc_url", string(mxcURL)).Str("filename", filename).Str("mime_type", mimeType).Str("message_id", data.ID).Msg("Successfully processed string attachment")
 								}
 							}
 						}
-						processed = true
 					} else {
 						// Log unhandled attachment types
 						portal.Bridge.Log.Debug().Str("message_id", data.ID).Interface("attachment", data.Attachment).Str("attachment_type", attachmentType).Msg("Unhandled attachment type - not a string or parseable object")
@@ -993,38 +983,6 @@ func (hn *HostexNetworkAPI) queueMessageEvent(ctx context.Context, portalKey net
 	hn.br.QueueRemoteEvent(hn.login, messageEvent)
 }
 
-func (hn *HostexNetworkAPI) getPortalForConversation(conv *hostexapi.Conversation) *bridgev2.Portal {
-	portalKey := networkid.PortalKey{
-		ID:       networkid.PortalID(conv.ID),
-		Receiver: hn.login.ID,
-	}
-
-	// Try to get existing portal
-	portal, err := hn.br.GetExistingPortalByKey(context.Background(), portalKey)
-	if err != nil {
-		hn.br.Log.Debug().Err(err).Str("portal_key", portalKey.String()).Msg("Portal not found, will be created later if needed")
-		// Portal will be created when needed by the bridge framework
-		return nil
-	}
-
-	return portal
-}
-
-func (hn *HostexNetworkAPI) handleMessage(ctx context.Context, portal *bridgev2.Portal, msg *hostexapi.Message, conversationID string) {
-	var senderID networkid.UserID
-	if msg.SenderRole == "host" {
-		senderID = networkid.UserID("host_" + string(hn.login.ID))
-	} else {
-		senderID = networkid.UserID("guest_" + conversationID)
-	}
-
-	// TODO: Convert message to Matrix format and send
-	hn.br.Log.Debug().
-		Str("conversation_id", conversationID).
-		Str("sender_id", string(senderID)).
-		Str("content", msg.Content).
-		Msg("Received message")
-}
 
 // sendStartupNotification sends a message to the admin user when the bridge starts
 func (hc *HostexConnector) sendStartupNotification(ctx context.Context) {
@@ -1086,10 +1044,6 @@ Send help for more commands.`,
 	hc.br.Log.Info().Str("admin_user", adminUserID).Str("room_id", managementRoom.String()).Msg("Startup notification sent successfully")
 }
 
-// handlePingCommand handles the ping command
-func (hc *HostexConnector) handlePingCommand(ce *commands.Event) {
-	ce.Reply("🏓 Pong! Hostex Bridge is running.")
-}
 
 // handleSyncCommand handles the sync command
 func (hc *HostexConnector) handleSyncCommand(ce *commands.Event) {
@@ -1192,10 +1146,12 @@ func (hc *HostexConnector) handleWebhook(w http.ResponseWriter, r *http.Request)
 	// For now, just acknowledge receipt
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"status": "received",
 		"bridge": "mautrix-hostex",
-	})
+	}); err != nil {
+		hc.br.Log.Error().Err(err).Msg("Failed to encode webhook response")
+	}
 }
 
 // handleHealth handles health check requests

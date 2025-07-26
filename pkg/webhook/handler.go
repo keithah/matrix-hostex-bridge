@@ -82,11 +82,13 @@ func (wh *WebhookHandler) Stop(ctx context.Context) error {
 func (wh *WebhookHandler) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{
+	if err := json.NewEncoder(w).Encode(map[string]string{
 		"status": "healthy",
 		"service": "mautrix-hostex",
 		"timestamp": time.Now().Format(time.RFC3339Nano),
-	})
+	}); err != nil {
+		wh.br.Log.Error().Err(err).Msg("Failed to encode health response")
+	}
 }
 
 func (wh *WebhookHandler) handleHostexWebhook(w http.ResponseWriter, r *http.Request) {
@@ -133,9 +135,11 @@ func (wh *WebhookHandler) handleHostexWebhook(w http.ResponseWriter, r *http.Req
 	}
 	
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{
+	if err := json.NewEncoder(w).Encode(map[string]string{
 		"status": "processed",
-	})
+	}); err != nil {
+		wh.br.Log.Error().Err(err).Msg("Failed to encode webhook response")
+	}
 }
 
 func (wh *WebhookHandler) handleMessageCreated(ctx context.Context, data interface{}) error {
