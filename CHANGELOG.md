@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.1.2] - 2025-07-26 - Enhanced Attachment Processing
+
+### Fixed
+- **Image Processing**: Fixed attachment processing to properly handle Hostex API structure
+- **Attachment URLs**: Now correctly extracts `fullback_url` and other URL fields from Hostex attachment objects
+- **MIME Type Detection**: Improved MIME type handling and filename extraction for attachments
+- **Empty Messages**: Fixed "(empty message)" issue - images now display properly inline in Matrix
+
+### Enhanced
+- **Attachment Object Parsing**: Added support for parsing complex attachment objects with multiple field names
+- **URL Field Fallback**: Tries multiple URL field names: `fullback_url`, `url`, `URL`, `src`, `href`, `link`
+- **Filename Extraction**: Better filename detection from attachment objects and URL parsing
+- **Debug Logging**: Added comprehensive attachment processing debug messages
+
+### Technical Details
+
+#### Attachment Processing Improvements
+- Enhanced `ConvertMessageFunc` in `pkg/connector/connector.go:757-984`
+- Added JSON marshaling/unmarshaling to properly handle Hostex attachment structure
+- Implemented fallback URL field detection for robust attachment handling  
+- Improved error handling and logging for attachment download/upload process
+
+#### Code Changes
+- `pkg/connector/connector.go:774-779`: Multiple URL field name detection
+- `pkg/connector/connector.go:792-804`: Enhanced filename extraction logic
+- `pkg/connector/connector.go:807-817`: Improved MIME type detection and conversion
+- `pkg/connector/connector.go:819,876`: Added debug logging for attachment processing
+
 ## [0.1.1] - 2025-07-23 - Double Puppeting Fix
 
 ### Fixed
