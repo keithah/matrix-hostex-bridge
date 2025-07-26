@@ -67,7 +67,7 @@ jobs:
       uses: docker/build-push-action@v5
       with:
         context: .
-        platforms: linux/amd64
+        platforms: linux/amd64,linux/arm64
         push: true
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
@@ -77,8 +77,6 @@ jobs:
           BUILD_TIME=${{ steps.build_info.outputs.build_time }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
-        provenance: false
-        sbom: false
 
     - name: Update Docker Hub description
       uses: peter-evans/dockerhub-description@v4
