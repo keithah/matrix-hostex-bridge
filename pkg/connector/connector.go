@@ -686,7 +686,6 @@ func (hn *HostexNetworkAPI) processConversation(ctx context.Context, conv hostex
 	}
 }
 
-
 func (hn *HostexNetworkAPI) queueMessageEvent(ctx context.Context, portalKey networkid.PortalKey, msg *hostexapi.Message, conversationID string, guestName string) {
 	// Check if this is a host message that was recently sent from Matrix (to prevent echo)
 	if msg.SenderRole == "host" {
@@ -759,17 +758,17 @@ func (hn *HostexNetworkAPI) queueMessageEvent(ctx context.Context, portalKey net
 				// Debug: Log attachment data structure and type
 				attachmentType := fmt.Sprintf("%T", data.Attachment)
 				portal.Bridge.Log.Debug().Interface("attachment", data.Attachment).Str("message_id", data.ID).Str("attachment_type", attachmentType).Msg("Processing attachment")
-				
+
 				var attachmentURL, filename, mimeType string
 				var processed bool
-				
+
 				// Try to parse attachment as an object
 				attachmentBytes, err := json.Marshal(data.Attachment)
 				if err == nil {
 					var attachmentObj map[string]interface{}
 					if err := json.Unmarshal(attachmentBytes, &attachmentObj); err == nil {
 						portal.Bridge.Log.Debug().Interface("parsed_attachment", attachmentObj).Str("message_id", data.ID).Msg("Successfully parsed attachment as object")
-						
+
 						// Handle image attachments - try multiple URL field names (Hostex uses "fullback_url")
 						for _, urlField := range []string{"fullback_url", "url", "URL", "src", "href", "link"} {
 							if url, ok := attachmentObj[urlField].(string); ok && url != "" {
@@ -777,7 +776,7 @@ func (hn *HostexNetworkAPI) queueMessageEvent(ctx context.Context, portalKey net
 								break
 							}
 						}
-						
+
 						if attachmentURL != "" {
 							// Try to get filename - check multiple field names or generate from URL
 							filename = "attachment"
@@ -787,7 +786,7 @@ func (hn *HostexNetworkAPI) queueMessageEvent(ctx context.Context, portalKey net
 									break
 								}
 							}
-							
+
 							// If no filename found, try to extract from URL
 							if filename == "attachment" && attachmentURL != "" {
 								if lastSlash := strings.LastIndex(attachmentURL, "/"); lastSlash != -1 {
@@ -799,6 +798,26 @@ func (hn *HostexNetworkAPI) queueMessageEvent(ctx context.Context, portalKey net
 										if qIndex := strings.Index(urlFilename, "?"); qIndex != -1 {
 											filename = urlFilename[:qIndex]
 										}
+									}
+								}
+								// For Hostex images ending in /xlarge, use a better filename
+								if filename == "xlarge" || filename == "large" || filename == "medium" || filename == "small" {
+									// Extract actual filename from the path before the size modifier
+									if strings.Contains(attachmentURL, ".jpeg/") || strings.Contains(attachmentURL, ".jpg/") {
+										// URL format: .../RQX1754769570578.jpeg/xlarge
+										parts := strings.Split(attachmentURL, "/")
+										if len(parts) >= 2 {
+											for i := len(parts) - 2; i >= 0; i-- {
+												if strings.Contains(parts[i], ".") {
+													filename = parts[i]
+													break
+												}
+											}
+										}
+									}
+									// If still a size name, use a generic image filename
+									if filename == "xlarge" || filename == "large" || filename == "medium" || filename == "small" {
+										filename = "image.jpg"
 									}
 								}
 							}
@@ -854,13 +873,24 @@ func (hn *HostexNetworkAPI) queueMessageEvent(ctx context.Context, portalKey net
 										msgType = event.MsgImage
 									}
 
-									mxcURL, _, err := intent.UploadMedia(ctx, portal.MXID, imageData, filename, mimeType)
+									portal.Bridge.Log.Debug().Int("image_size", len(imageData)).Str("filename", filename).Str("mime_type", mimeType).Msg("Uploading image to Matrix")
+									mxcURL, uploadInfo, err := intent.UploadMedia(ctx, portal.MXID, imageData, filename, mimeType)
 									if err != nil {
+										portal.Bridge.Log.Error().Err(err).Str("filename", filename).Int("size", len(imageData)).Msg("Failed to upload image to Matrix")
 										parts = append(parts, &bridgev2.ConvertedMessagePart{
 											Type: event.EventMessage,
 											Content: &event.MessageEventContent{
 												MsgType: event.MsgText,
-												Body:    fmt.Sprintf("📎 %s: %s (upload failed)", filename, attachmentURL),
+												Body:    fmt.Sprintf("📎 %s: %s (upload failed: %v)", filename, attachmentURL, err),
+											},
+										})
+									} else if mxcURL == "" {
+										portal.Bridge.Log.Error().Str("filename", filename).Interface("upload_info", uploadInfo).Msg("Matrix upload returned empty mxcURL")
+										parts = append(parts, &bridgev2.ConvertedMessagePart{
+											Type: event.EventMessage,
+											Content: &event.MessageEventContent{
+												MsgType: event.MsgText,
+												Body:    fmt.Sprintf("📎 %s: %s (Matrix upload returned empty URL)", filename, attachmentURL),
 											},
 										})
 									} else {
@@ -873,7 +903,7 @@ func (hn *HostexNetworkAPI) queueMessageEvent(ctx context.Context, portalKey net
 											},
 										})
 										processed = true
-										portal.Bridge.Log.Debug().Str("mxc_url", string(mxcURL)).Str("filename", filename).Str("mime_type", mimeType).Str("message_id", data.ID).Msg("Successfully processed attachment")
+										portal.Bridge.Log.Info().Str("mxc_url", string(mxcURL)).Str("filename", filename).Str("mime_type", mimeType).Str("message_id", data.ID).Msg("Successfully uploaded attachment to Matrix")
 									}
 								}
 							}
@@ -884,13 +914,13 @@ func (hn *HostexNetworkAPI) queueMessageEvent(ctx context.Context, portalKey net
 				} else {
 					portal.Bridge.Log.Debug().Str("message_id", data.ID).Str("error", err.Error()).Msg("Failed to marshal attachment for parsing")
 				}
-				
+
 				// If object parsing failed, try string parsing
 				if !processed {
 					// Handle attachment as string (URL)
 					if attachmentStr, ok := data.Attachment.(string); ok && attachmentStr != "" {
 						portal.Bridge.Log.Debug().Str("attachment_string", attachmentStr).Str("message_id", data.ID).Msg("Processing attachment as string URL")
-						
+
 						// Download the attachment
 						resp, err := http.Get(attachmentStr)
 						if err != nil {
@@ -939,13 +969,24 @@ func (hn *HostexNetworkAPI) queueMessageEvent(ctx context.Context, portalKey net
 									}
 								}
 
-								mxcURL, _, err := intent.UploadMedia(ctx, portal.MXID, imageData, filename, mimeType)
+								portal.Bridge.Log.Debug().Int("image_size", len(imageData)).Str("filename", filename).Str("mime_type", mimeType).Msg("Uploading string attachment image to Matrix")
+								mxcURL, uploadInfo, err := intent.UploadMedia(ctx, portal.MXID, imageData, filename, mimeType)
 								if err != nil {
+									portal.Bridge.Log.Error().Err(err).Str("filename", filename).Int("size", len(imageData)).Msg("Failed to upload string attachment to Matrix")
 									parts = append(parts, &bridgev2.ConvertedMessagePart{
 										Type: event.EventMessage,
 										Content: &event.MessageEventContent{
 											MsgType: event.MsgText,
-											Body:    fmt.Sprintf("📎 %s: %s (upload failed)", filename, attachmentStr),
+											Body:    fmt.Sprintf("📎 %s: %s (upload failed: %v)", filename, attachmentStr, err),
+										},
+									})
+								} else if mxcURL == "" {
+									portal.Bridge.Log.Error().Str("filename", filename).Interface("upload_info", uploadInfo).Msg("Matrix upload returned empty mxcURL for string attachment")
+									parts = append(parts, &bridgev2.ConvertedMessagePart{
+										Type: event.EventMessage,
+										Content: &event.MessageEventContent{
+											MsgType: event.MsgText,
+											Body:    fmt.Sprintf("📎 %s: %s (Matrix upload returned empty URL)", filename, attachmentStr),
 										},
 									})
 								} else {
@@ -957,7 +998,7 @@ func (hn *HostexNetworkAPI) queueMessageEvent(ctx context.Context, portalKey net
 											URL:     id.ContentURIString(string(mxcURL)),
 										},
 									})
-									portal.Bridge.Log.Debug().Str("mxc_url", string(mxcURL)).Str("filename", filename).Str("mime_type", mimeType).Str("message_id", data.ID).Msg("Successfully processed string attachment")
+									portal.Bridge.Log.Info().Str("mxc_url", string(mxcURL)).Str("filename", filename).Str("mime_type", mimeType).Str("message_id", data.ID).Msg("Successfully uploaded string attachment to Matrix")
 								}
 							}
 						}
@@ -989,7 +1030,6 @@ func (hn *HostexNetworkAPI) queueMessageEvent(ctx context.Context, portalKey net
 	// Queue the message event
 	hn.br.QueueRemoteEvent(hn.login, messageEvent)
 }
-
 
 // sendStartupNotification sends a message to the admin user when the bridge starts
 func (hc *HostexConnector) sendStartupNotification(ctx context.Context) {
@@ -1050,7 +1090,6 @@ Send help for more commands.`,
 
 	hc.br.Log.Info().Str("admin_user", adminUserID).Str("room_id", managementRoom.String()).Msg("Startup notification sent successfully")
 }
-
 
 // handleSyncCommand handles the sync command
 func (hc *HostexConnector) handleSyncCommand(ce *commands.Event) {
