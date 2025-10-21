@@ -18,7 +18,7 @@ func main() {
 		Name:        "mautrix-hostex",
 		Description: "A Matrix bridge for Hostex property management system",
 		URL:         "https://github.com/keithah/matrix-hostex-bridge",
-		Version:     "0.1.2",
+		Version:     "0.2.0",
 		Connector:   &connector.HostexConnector{}, // Switch back to full connector
 	}
 	m.InitVersion(Tag, Commit, BuildTime)
