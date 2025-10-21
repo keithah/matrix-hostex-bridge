@@ -2,7 +2,7 @@ package main
 
 import (
 	"hostex-matrix-bridge/pkg/connector"
-	
+
 	"maunium.net/go/mautrix/bridgev2/matrix/mxmain"
 )
 
