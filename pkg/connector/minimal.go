@@ -25,7 +25,7 @@ func (hc *MinimalHostexConnector) Init(bridge *bridgev2.Bridge) {
 
 func (hc *MinimalHostexConnector) Start(ctx context.Context) error {
 	hc.br.Log.Info().Msg("DEBUG: Starting MINIMAL Hostex connector for testing")
-	
+
 	// Start a background monitoring goroutine to track activity
 	go func() {
 		defer func() {
@@ -33,10 +33,10 @@ func (hc *MinimalHostexConnector) Start(ctx context.Context) error {
 				hc.br.Log.Error().Interface("panic", r).Msg("DEBUG: PANIC in background monitor goroutine!")
 			}
 		}()
-		
+
 		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
-		
+
 		for {
 			select {
 			case <-ctx.Done():
@@ -47,7 +47,7 @@ func (hc *MinimalHostexConnector) Start(ctx context.Context) error {
 			}
 		}
 	}()
-	
+
 	hc.br.Log.Info().Msg("DEBUG: Background monitor started")
 	hc.br.Log.Info().Msg("DEBUG: Start method completed successfully")
 	return nil
@@ -58,7 +58,7 @@ func (hc *MinimalHostexConnector) GetName() bridgev2.BridgeName {
 	return bridgev2.BridgeName{
 		DisplayName:      "Hostex",
 		NetworkURL:       "https://hostex.io",
-		NetworkIcon:      "mxc://local.beeper.com/hostex-logo",  // Hostex logo from https://www.hotelminder.com/images/brand/Hostex.png
+		NetworkIcon:      "mxc://local.beeper.com/hostex-logo", // Hostex logo from https://www.hotelminder.com/images/brand/Hostex.png
 		NetworkID:        "hostex",
 		BeeperBridgeType: "hostex",
 		DefaultPort:      29337,
@@ -121,7 +121,7 @@ func (hc *MinimalHostexConnector) GetLoginFlows() []bridgev2.LoginFlow {
 
 func (hc *MinimalHostexConnector) CreateLogin(ctx context.Context, user *bridgev2.User, flowID string) (bridgev2.LoginProcess, error) {
 	hc.br.Log.Info().Str("flow_id", flowID).Msg("DEBUG: CreateLogin called")
-	
+
 	switch flowID {
 	case "token":
 		hc.br.Log.Info().Msg("DEBUG: Creating MinimalHostexLogin for token flow")
@@ -139,13 +139,13 @@ func (hc *MinimalHostexConnector) CreateLogin(ctx context.Context, user *bridgev
 
 func (hc *MinimalHostexConnector) LoadUserLogin(ctx context.Context, login *bridgev2.UserLogin) error {
 	hc.br.Log.Info().Str("login_id", string(login.ID)).Msg("DEBUG: LoadUserLogin called")
-	
+
 	// Minimal implementation - create a dummy NetworkAPI
 	nl := &MinimalNetworkAPI{
 		br:    hc.br,
 		login: login,
 	}
-	
+
 	hc.br.Log.Info().Msg("DEBUG: Created MinimalNetworkAPI")
 	login.Client = nl
 	hc.br.Log.Info().Msg("DEBUG: LoadUserLogin completed successfully")
@@ -259,7 +259,7 @@ var _ bridgev2.LoginProcessUserInput = (*MinimalHostexLogin)(nil)
 
 func (hl *MinimalHostexLogin) Start(ctx context.Context) (*bridgev2.LoginStep, error) {
 	hl.br.Log.Info().Msg("DEBUG: MinimalHostexLogin.Start() called")
-	
+
 	step := &bridgev2.LoginStep{
 		Type:         bridgev2.LoginStepTypeUserInput,
 		StepID:       "token",
@@ -273,7 +273,7 @@ func (hl *MinimalHostexLogin) Start(ctx context.Context) (*bridgev2.LoginStep, e
 			}},
 		},
 	}
-	
+
 	hl.br.Log.Info().Msg("DEBUG: LoginStep created, returning from Start()")
 	return step, nil
 }
@@ -288,19 +288,19 @@ func (hl *MinimalHostexLogin) SubmitUserInput(ctx context.Context, input map[str
 			hl.br.Log.Error().Interface("panic", r).Msg("DEBUG: PANIC in SubmitUserInput!")
 		}
 	}()
-	
+
 	hl.br.Log.Info().Msg("DEBUG: MinimalHostexLogin.SubmitUserInput() called - ENTRY POINT")
 	hl.br.Log.Info().Interface("input", input).Msg("DEBUG: Input received")
-	
+
 	accessToken := input["access_token"]
 	if accessToken == "" {
 		hl.br.Log.Error().Msg("DEBUG: Access token is empty")
 		return nil, fmt.Errorf("access token is required")
 	}
-	
+
 	hl.br.Log.Info().Int("token_length", len(accessToken)).Msg("DEBUG: Got access token")
 	hl.br.Log.Info().Msg("DEBUG: About to return test error - ALMOST DONE")
-	
+
 	// Just return a test error to verify the login flow works without crashing
 	err := fmt.Errorf("MINIMAL LOGIN TEST: Got token with %d characters - login flow is working!", len(accessToken))
 	hl.br.Log.Info().Err(err).Msg("DEBUG: Returning error - SUCCESS!")

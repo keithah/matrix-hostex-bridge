@@ -56,9 +56,9 @@ func (hc *HostexConnector) Start(ctx context.Context) error {
 	if server, ok := hc.br.Matrix.(bridgev2.MatrixConnectorWithServer); ok {
 		router := server.GetRouter()
 		if router != nil {
-			r := router.PathPrefix("/_matrix/mau/hostex").Subrouter()
-			r.HandleFunc("/webhook", hc.handleWebhook).Methods("POST")
-			r.HandleFunc("/health", hc.handleHealth).Methods("GET")
+			// Register webhook endpoint (http.ServeMux uses full paths)
+			router.HandleFunc("POST /_matrix/mau/hostex/webhook", hc.handleWebhook)
+			router.HandleFunc("GET /_matrix/mau/hostex/health", hc.handleHealth)
 			hc.br.Log.Info().Msg("Registered HTTP endpoints for webhooks")
 		} else {
 			hc.br.Log.Warn().Msg("Router is nil - webhooks disabled")
