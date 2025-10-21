@@ -240,11 +240,7 @@ func (c *Client) GetConversations(ctx context.Context) ([]Conversation, error) {
 }
 
 func (c *Client) GetConversationDetails(ctx context.Context, conversationID string) (*ConversationDetails, error) {
-	// Debug: Log the exact API call being made
-	fullURL := BaseURL + "/conversations/" + conversationID
-	fmt.Printf("DEBUG: Making API call to: %s\n", fullURL)
-	fmt.Printf("DEBUG: Using token: %s...\n", c.accessToken[:10])
-
+	// Debug logging removed to avoid leaking secrets
 	resp, err := c.doRequest(ctx, "GET", "/conversations/"+conversationID, nil)
 	if err != nil {
 		return nil, err

@@ -3,7 +3,6 @@ module hostex-matrix-bridge
 go 1.24.5
 
 require (
-	github.com/gorilla/mux v1.8.0
 	github.com/rs/zerolog v1.34.0
 	go.mau.fi/util v0.9.2
 	maunium.net/go/mautrix v0.25.2
