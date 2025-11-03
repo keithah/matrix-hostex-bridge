@@ -8,6 +8,7 @@ on:
 
 jobs:
   test:
+    timeout-minutes: 8
     runs-on: ubuntu-latest
     
     steps:
@@ -50,6 +51,7 @@ jobs:
         fi
 
   lint:
+    timeout-minutes: 8
     runs-on: ubuntu-latest
     
     steps:
@@ -73,6 +75,7 @@ jobs:
         args: --timeout=5m
 
   docker-build-test:
+    timeout-minutes: 8
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     
