@@ -14,8 +14,8 @@ services:
     
     # Volume mounts
     volumes:
-      - ./data:/data
-      - ./logs:/data/logs
+      - /config/matrix-hostex/data:/data
+      - /config/matrix-hostex/logs:/data/logs
     
     # Network configuration
     ports:
@@ -32,8 +32,9 @@ services:
           cpus: '0.25'
     
     # Health check
+    # In websocket mode, the HTTP server may not be available, so we check the process and database instead
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:29337/_matrix/mau/hostex/health"]
+      test: ["CMD-SHELL", "pgrep -f matrix-hostex-bridge || test -f /data/mautrix-hostex.db"]
       interval: 30s
       timeout: 10s
       retries: 3

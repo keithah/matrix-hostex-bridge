@@ -17,6 +17,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/commands"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
+	"maunium.net/go/mautrix/bridgev2/status"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
 )
@@ -290,6 +291,19 @@ var _ bridgev2.NetworkAPI = (*HostexNetworkAPI)(nil)
 
 func (hn *HostexNetworkAPI) Connect(ctx context.Context) {
 	hn.br.Log.Info().Str("user_login", string(hn.login.ID)).Msg("Connecting to Hostex")
+
+	// Send bridge state to indicate we're connected
+	if hn.login.BridgeState != nil {
+		hn.br.Log.Info().Str("user_login", string(hn.login.ID)).Msg("Sending CONNECTED bridge state")
+		hn.login.BridgeState.Send(status.BridgeState{
+			StateEvent: status.StateConnected,
+			Info: map[string]any{
+				"conn_timestamp": time.Now().Unix(),
+			},
+		})
+	} else {
+		hn.br.Log.Warn().Str("user_login", string(hn.login.ID)).Msg("BridgeState is nil, cannot send status")
+	}
 
 	// Start polling for conversations and messages
 	go hn.pollConversations(ctx)
